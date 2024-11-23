@@ -1,14 +1,14 @@
-import jax
-import chex
-import jax.numpy as jnp
-
-from typing import Any
 from functools import partial
+from typing import Any
+
+import chex
+import jax
+import jax.numpy as jnp
 from flax.training.train_state import TrainState
 
-from util import *
-from agents.agents import eval_agent, compute_advantage
+from agents.agents import compute_advantage, eval_agent
 from agents.lpg_agent import train_lpg_agent
+from util import *
 
 
 def lpg_meta_grad_train_step(
@@ -187,7 +187,12 @@ def lpg_es_train_step(
             agent_state.actor_state,
             num_env_workers,
         )
-        return agent_state, candidate_fitness, metrics
+
+        # Compute average return per agent
+        agent_return = jnp.mean(candidate_fitness)
+
+        # Return agent state, fitness, and return
+        return agent_state, candidate_fitness, agent_return, metrics
 
     # --- Evaluate LPG candidates ---
     repeated_agent_states = jax.tree_map(
@@ -195,7 +200,7 @@ def lpg_es_train_step(
     )
     rng, _rng = jax.random.split(rng)
     _rng = jax.random.split(_rng, lpg_train_state.strategy.popsize)
-    repeated_agent_states, fitness, agent_metrics = mini_batch_vmap(
+    repeated_agent_states, fitness, agent_returns, agent_metrics = mini_batch_vmap(
         _compute_candidate_fitness, num_mini_batches
     )(_rng, candidate_params, repeated_agent_states)
 
@@ -223,5 +228,6 @@ def lpg_es_train_step(
             "var": jnp.var(fitness),
         },
         "lpg_agent": jax.tree_map(jnp.mean, agent_metrics.as_dict()),
+        "lpg_agent_return": jnp.mean(agent_returns),  # Average return across agents
     }
     return lpg_train_state, agent_states, None, metrics

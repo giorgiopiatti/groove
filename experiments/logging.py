@@ -1,9 +1,8 @@
 import os
+
 import jax
 import wandb
-
 from flax.training import checkpoints
-
 
 CKPT_DIR = "checkpoints"
 
@@ -24,8 +23,8 @@ def init_logger(args):
 
 def log_results(args, metrics, train_state, level_buffer):
     # Log metrics
-    for step in range(args.train_steps):
-        wandb.log(jax.tree_map(lambda x: x[step], metrics))
+    # for step in range(args.train_steps):
+    #     wandb.log(jax.tree_map(lambda x: x[step], metrics))
 
     # Log checkpoints
     ckpt_path = checkpoints.save_checkpoint(

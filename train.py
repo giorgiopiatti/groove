@@ -1,14 +1,25 @@
-import jax
 import sys
 
+import jax
+import numpy as np
+import wandb
 from jax import random
+from jax.experimental import host_callback
 from rich.traceback import install
 
-from util import *
 from environments.level_sampler import LevelSampler
-from experiments.parse_args import parse_args
 from experiments.logging import init_logger, log_results
+from experiments.parse_args import parse_args
 from meta.meta import create_lpg_train_state, make_lpg_train_step
+from util import *
+
+
+def log_metrics(arg, transforms):
+    step, metrics = arg
+    # Convert metrics from JAX arrays to NumPy arrays
+    metrics_np = jax.tree_util.tree_map(lambda x: np.array(x), metrics)
+    # Log the metrics via wandb
+    wandb.log(metrics_np, step=int(step))
 
 
 def make_train(args):
@@ -19,7 +30,7 @@ def make_train(args):
         level_sampler = LevelSampler(args)
         level_buffer = level_sampler.initialize_buffer(buffer_rng)
 
-        # --- Initialze agents and value critics ---
+        # --- Initialize agents and value critics ---
         require_value_critic = not args.use_es
         rng, _rng = jax.random.split(rng)
         level_buffer, agent_states, value_critic_states = level_sampler.initial_sample(
@@ -29,7 +40,7 @@ def make_train(args):
         # --- TRAIN LOOP ---
         lpg_train_step_fn = make_lpg_train_step(args, level_sampler)
 
-        def _meta_train_loop(carry, _):
+        def _meta_train_loop(carry, step):
             rng, train_state, agent_states, value_critic_states, level_buffer = carry
 
             # --- Update LPG ---
@@ -47,14 +58,19 @@ def make_train(args):
                 _rng, level_buffer, agent_states, value_critic_states
             )
             carry = (rng, train_state, agent_states, value_critic_states, level_buffer)
+
+            # Log metrics using host_callback.id_tap
+            host_callback.id_tap(log_metrics, (step, metrics))
+
             return carry, metrics
 
         # --- Stack and return metrics ---
         carry = (rng, train_state, agent_states, value_critic_states, level_buffer)
+        steps = jnp.arange(args.train_steps)
         carry, metrics = jax.lax.scan(
-            _meta_train_loop, carry, None, length=args.train_steps
+            _meta_train_loop, carry, xs=steps, length=args.train_steps
         )
-        return metrics, train_state, level_buffer
+        return metrics, train_state, level_buffer  # HERE
 
     return _train_fn
 
